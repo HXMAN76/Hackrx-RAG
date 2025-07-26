@@ -109,8 +109,8 @@ def process_directory(input_dir: str, output_path: str) -> None:
 def main():
   """Main function to process all PDFs in a directory."""
   try:
-    input_dir = "../dataset"  # Directory containing PDF files
-    output_path = "../dataset/combined_dataset.txt"  # Output text file
+    input_dir = "./dataset"  # Directory containing PDF files
+    output_path = "./dataset/combined_dataset.txt"  # Output text file
     
     process_directory(input_dir, output_path)
     
