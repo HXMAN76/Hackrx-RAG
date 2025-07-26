@@ -1,2 +1,2 @@
 .venv/
-./dataset/combined_dataset.txt
+dataset/combined_dataset.txt
