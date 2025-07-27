@@ -1,2 +1,4 @@
 pdfplumber
 tabula-py
+PyPDF2
+nltk
