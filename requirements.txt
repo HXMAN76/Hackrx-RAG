@@ -1,14 +1,13 @@
 # Document parsing
-PyMuPDF==1.23.7
-pdfplumber==0.11.7
+pymupdf==1.23.7
 python-docx==1.1.0
 
 # Embedding
 sentence-transformers==2.7.0
 
 # Vector DB (Qdrant + optional Chroma)
-qdrant-client==1.6.0
-chromadb==0.4.24  # Only for local dev
+qdrant-client==1.15.0  # Latest stable as of July 2025[4]
+chromadb==0.4.24       # Only for local dev
 
 # FastAPI backend
 fastapi==0.110.1
@@ -21,7 +20,7 @@ aiohttp==3.9.5
 httpx==0.27.0
 
 # Data modeling
-pydantic==2.7.1
+pydantic
 
 # LLM integration (Ollama API / Local)
 requests==2.31.0
@@ -31,3 +30,6 @@ python-multipart==0.0.9  # If you're handling file uploads
 
 # For rate limiting and security (optional)
 slowapi==0.1.8
+
+# environment management
+python-dotenv==1.0.0
