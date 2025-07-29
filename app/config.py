@@ -16,9 +16,11 @@ QDRANT_COLLECTION = "rag-collection"
 VECTOR_SIZE = 768
 VECTOR_DISTANCE = "COSINE"  # Options: COSINE, EUCLID, DOT
 
-# ------------------ Ollama / LLM ------------------
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
-OLLAMA_MODEL = "llama3"
+# ------------------ LLM (Groq) ------------------
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Required for Groq
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_TEMPERATURE = 0.1  # Lower temperature for more factual responses
+GROQ_MAX_TOKENS = 1024  # Maximum tokens for response
 
 # ------------------ Embedding Model ------------------
 EMBEDDING_MODEL_NAME = "BAAI/bge-base-en-v1.5"
@@ -34,8 +36,10 @@ ASYNC_TIMEOUT = 20  # seconds for HTTP clients
 TOP_K_RETRIEVAL = 3
 
 # ------------------ Security ------------------
-ENABLE_AUTH = False
+ENABLE_AUTH = True  # Enable authentication
 API_KEY_HEADER = "X-API-Key"
+# Default token if none provided in environment
+AUTH_TOKEN = os.getenv("AUTH_TOKEN", "a692774361df87466df8df0cbdecb1a9daca509b1a31d0948aad64b7b3ae5f12")
 
 # ------------------ Logging ------------------
 ENABLE_LOGGING = True

@@ -22,8 +22,9 @@ httpx==0.27.0
 # Data modeling
 pydantic
 
-# LLM integration (Ollama API / Local)
+# LLM integration
 requests==2.31.0
+groq==0.9.0  # Groq API client
 
 # Optional: Docker health checks, linting etc.
 python-multipart==0.0.9  # If you're handling file uploads
@@ -33,3 +34,4 @@ slowapi==0.1.8
 
 # environment management
 python-dotenv==1.0.0
+
