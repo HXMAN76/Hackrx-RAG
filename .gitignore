@@ -3,3 +3,60 @@ dataset/combined_dataset.txt
 dataset/combined_chunks.json
 *.env
 milvus/
+volumes/
+
+# 🚫 Secrets & Configs
+.env
+*.key
+*.pem
+config.yaml
+
+# 🧪 Virtual Environments
+.venv/
+env/
+venv/
+__pycache__/
+*.py[cod]
+
+# 📦 Package & Dependency
+*.egg-info/
+dist/
+build/
+*.log
+
+# 📊 Datasets & Outputs
+dataset/
+*.csv
+*.tsv
+*.json
+*.xlsx
+*.h5
+*.npy
+*.npz
+*.pkl
+*.joblib
+*.pt
+*.onnx
+*.sav
+
+# 🔍 ML Experiment Tracking
+mlruns/
+wandb/
+tensorboard/
+
+# 🧠 Model Checkpoints
+checkpoints/
+models/
+*.ckpt
+*.pth
+
+# ⚙️ Milvus or DB dirs
+milvus/
+db/
+
+# 🔧 System Files
+.DS_Store
+Thumbs.db
+
+# 🚀 VSCode settings
+.vscode/
