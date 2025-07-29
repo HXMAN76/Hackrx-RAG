@@ -1,3 +1,5 @@
 .venv/
 dataset/combined_dataset.txt
 dataset/combined_chunks.json
+*.env
+milvus/
