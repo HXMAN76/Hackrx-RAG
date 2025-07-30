@@ -39,7 +39,7 @@ TOP_K_RETRIEVAL = 3
 ENABLE_AUTH = True  # Enable authentication
 API_KEY_HEADER = "X-API-Key"
 # Default token if none provided in environment
-AUTH_TOKEN = os.getenv("AUTH_TOKEN", "a692774361df87466df8df0cbdecb1a9daca509b1a31d0948aad64b7b3ae5f12")
+AUTH_TOKEN = os.getenv("AUTH_TOKEN", "")
 
 # ------------------ Logging ------------------
 ENABLE_LOGGING = True
