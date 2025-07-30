@@ -1,5 +1,5 @@
 # Document parsing
-pymupdf==1.26.3        # Latest stable, manylinux, Python 3.13 support
+pymupdf==1.23.7
 python-docx==1.1.0
 
 # Embedding
