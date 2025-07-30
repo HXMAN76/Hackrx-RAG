@@ -68,8 +68,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add routes
-app.include_router(rag.router, tags=["RAG"])
+# Add routes with API version prefix
+app.include_router(rag.router, prefix="/api/v1", tags=["RAG"])
 
 
 # Add request timing middleware
