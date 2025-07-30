@@ -5,7 +5,7 @@
 API_URL="http://localhost:8000/api/v1/hackrx/run"
 
 # Auth token
-AUTH_TOKEN="a692774361df87466df8df0cbdecb1a9daca509b1a31d0948aad64b7b3ae5f12"
+AUTH_TOKEN=""
 
 # Document URL (policy PDF)
 DOC_URL="https://hackrx.blob.core.windows.net/assets/policy.pdf?sv=2023-01-03&st=2025-07-04T09%3A11%3A24Z&se=2027-07-05T09%3A11%3A00Z&sr=b&sp=r&sig=N4a9OU0w0QXO6AOIBiu4bpl7AXvEZogeT%2FjUHNO7HzQ%3D"
