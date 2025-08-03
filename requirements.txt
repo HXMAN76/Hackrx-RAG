@@ -1,0 +1,7 @@
+python-dotenv
+llama-cloud-services
+fastapi
+uvicorn
+aiohttp
+sentence-transformers
+spacy
