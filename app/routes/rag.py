@@ -84,7 +84,7 @@ async def run_rag(request: RAGRequest):
     result = retrival.llm_inference(request.questions)
     if not result:
         raise HTTPException(status_code=404, detail="No answers found for the provided questions")
-    return {"answers": result}
+    return result
 
 
 async def vectorize(url: str):

@@ -65,34 +65,34 @@ def format_retrieval_results(results: List[List[str]]) -> str:
         
     return formatted
 
-def llm_inference(questions: List[str]) -> str:
+def llm_inference(questions: List[str]) -> dict:
     answers = retrieve_answers(questions)
     prompt = f"""
-        You are a helpful assistant. Using only the retrieved context chunks, respond to the user's questions.
-        **Instructions**:
-        - For each question, synthesize an answer using **only the corresponding list of context chunks**.
-        - Respond in **a single formal and complete sentence** per question.
-        - Incorporate **all specific conditions, durations, and clauses** mentioned in the context.
-        - Use a **professional tone**, reusing **exact phrases** from the chunks wherever possible.
-        - Do **infer or assume** any information if provided context doesn't cover it.
-        - Preserve the **order of questions** in the final output.
+You are a helpful assistant. Using only the retrieved context chunks, respond to the user's questions.
 
-        **Input**:
-        A dictionary mapping each question to its top 3 context chunks:
-        {answers}
-        
-        **Expected Output Format**:
-        [
-            "Answer to Question 1",
-            "Answer to Question 2",
-            ...
-            "Answer to Question N"
-        ]
-        {questions}
-        
-        
-    """
+**Instructions**:
+- For each question, synthesize an answer using **only the corresponding list of context chunks**.
+- Respond in **a single formal and complete sentence** per question.
+- Incorporate **all specific conditions, durations, and clauses** mentioned in the context.
+- Use a **professional tone**, reusing **exact phrases** from the chunks wherever possible.
+- Do **not** infer or assume any information if provided context doesn't cover it.
+- Preserve the **order of questions** in the final output.
+- **Return ONLY a Python list of strings** (no extra text, no labels, no numbering).
 
+**Input**:
+A dictionary mapping each question to its top 3 context chunks:
+{answers}
+
+**Questions**:
+{questions}
+
+**Output Format**:
+[
+    "Answer to question 1...",
+    "Answer to question 2...",
+    ...
+]
+"""
 
     response = groq_client.chat.completions.create(
         model=GROQ_MODEL,
@@ -100,10 +100,16 @@ def llm_inference(questions: List[str]) -> str:
         temperature=GROQ_TEMPERATURE,
         max_tokens=GROQ_MAX_TOKENS,
     )
-    content = response.choices[0].message.content.strip().rstrip(',')
-    if not content.endswith(']'):
-        content += ']'
-    return response.choices[0].message.content
-    # return format_retrieval_results(response.choices[0].message.content)  # Ensure the response is parsed correctly
-    # return ast.literal_eval(content)
 
+    # Try parsing the LLM response content into a Python list
+    content = response.choices[0].message.content.strip()
+
+    try:
+        parsed_answers = ast.literal_eval(content)
+        if isinstance(parsed_answers, list) and all(isinstance(ans, str) for ans in parsed_answers):
+            return {"answers": parsed_answers}
+        else:
+            raise ValueError("Response format is invalid.")
+    except Exception as e:
+        # Fallback response or logging
+        return {"answers": [f"Error parsing model response: {e}"]}
