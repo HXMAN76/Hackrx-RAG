@@ -1,4 +1,8 @@
-import app.utils.downloader as fetcher
+import app.utils.downloader__ as fetcher
+import app.service.chunker as chunker
+import app.service.embedder as embedder
+import app.service.vector_store as vector_store
+import app.service.retrival as retrival
 from fastapi import APIRouter, HTTPException, Depends, Header, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import logging
@@ -8,6 +12,8 @@ from app.config import(
   ENABLE_AUTH,
   APP_VERSION,
 )
+from pydantic import BaseModel
+from typing import List
 
 router = APIRouter(prefix="/hackrx")
 logger = logging.getLogger(__name__)
@@ -55,23 +61,61 @@ async def verify_auth(
 #         Health status
 #     """
 #     return HealthResponse(status="ok", version=APP_VERSION)
+class RAGRequest(BaseModel):
+    documents: str
+    questions: List[str]
 
 
-@router.post("/document", tags=["RAG"], dependencies=[Depends(verify_auth)])
-async def get_document_text(url: str):
+@router.post("/run", tags=["RAG"], dependencies=[Depends(verify_auth)])
+async def run_rag(request: RAGRequest):
     """
-    Fetch and process document text from a given URL.
-    
-    Args:
-        url: URL of the document to fetch
+    Runs the batch processing pipeline for a document URL (eml, .pdf, .docx).
+    args:
+        url: Document URL to process
     Returns:
-        Processed text content of the document
+        dict: Processing status
+    Raises:
+        HTTPException: If document not found or processing fails
+    """
+    isProcessed = await vectorize(request.documents)
+    if not isProcessed:
+        raise HTTPException(status_code=500, detail="Processing failed")
+    
+    result = retrival.llm_inference(request.questions)
+    if not result:
+        raise HTTPException(status_code=404, detail="No answers found for the provided questions")
+    return {"answers": result}
+
+
+async def vectorize(url: str):
+    """
+    End-to-end processing pipeline:
+    - Download document
+    - Chunk text
+    - Save chunks
+    - Embed chunks
+    - Upload vectors to Qdrant
     """
     document = await fetcher.document_downloader(url)
+    logger.info(f"Fetched document from URL: {url}")
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
-    
-    return {"text": document}  # ✅ Return the parsed content
 
-    #processed_text = await fetcher.process_document_text(document)
-    #return {"text": processed_text}
+    chunks = chunker.chunk_text(document)
+    logger.info(f"Chunking completed. Total chunks: {len(chunks)}")
+
+    try:
+        chunked_file_path = chunker.save_chunks(chunks, url)
+        logger.info(f"Chunked text saved. Path: {chunked_file_path}")
+
+        embed_path = embedder.embed_chunks(chunked_file_path, source_file=url)
+        logger.info(f"Embedding completed. Path: {embed_path}")
+
+        vector_store.upload_qdrant_ready_file(embed_path)
+        logger.info(f"Vectors uploaded to Qdrant collection '{vector_store.COLLECTION_NAME}'.")
+
+    except Exception as e:
+        logger.error(f"Error during processing: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+    return {"retrieval": True}

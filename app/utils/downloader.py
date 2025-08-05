@@ -1,165 +1,255 @@
-from email import utils
-from llama_cloud_services import LlamaParse
-import asyncio
-import time
 import os
-from dotenv import load_dotenv
-import aiohttp
-from pathlib import Path
+import re
+import asyncio
 import tempfile
+from pathlib import Path
+from collections import Counter
 import logging
-import app.utils.chunker as chunker
-import app.utils.embedder as embedder
+import aiohttp
+import fitz  # PyMuPDF
+import pdfplumber
+import docx
+import email
+from email import policy
+from bs4 import BeautifulSoup
 
-
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# =========================
+# Text Cleaner Utility
+# =========================
+class TextSanitizer:
+    def __init__(self):
+        self.patterns_to_remove = [
+            r'UIN[:\-\s]*[A-Z0-9]+',
+            r'Reg\.?\s*No\.?\s*[:\-\s]*\d+',
+            r'CIN\s*[:\-\s]*[A-Z0-9]+',
+            r'IRDAI\s*Regn?\.?\s*No\.?\s*[:\-\s]*\d+',
+            r'Page\s+\d+\s+of\s+\d+',
+            r'^\d+\s*$',
+            r'www\.[a-zA-Z0-9\-\.]+\.com',
+            r'E-mail:\s*[a-zA-Z0-9\-\.@]+',
+            r'Call at:\s*.*?\(Toll Free.*?\)',
+            r'For more details.*?Toll Free.*?\)',
+            r'Regd\.?\s*&\s*Head Office:.*?-\s*\d{6}',
+            r'Plot no\..*?-\s*\d{6}',
+            r'^[A-Z\s]{10,}\s*$',
+        ]
+        self.ocr_fixes = {
+            ' . ': '. ', ' , ': ', ', ' ; ': '; ', ' : ': ': ',
+            '( ': '(', ' )': ')', ' / ': '/',
+            'O ': '0 ', 'l ': '1 ', '  ': ' ',
+        }
 
-load_dotenv()
-from app.config import (
-    LLAMA_API_KEY,
-    LLAMA_LANGUAGE,
-    LLAMA_FAST_MODE,
-    LLAMA_DISABLE_OCR,
-    LLAMA_DISABLE_IMG,
-    LLAMA_HIDE_HEADERS,
-    LLAMA_HIDE_FOOTERS,
-    ASYNC_TIMEOUT
-)
+    def _identify_repeated_lines(self, lines, threshold=3):
+        line_counts = Counter(line.strip() for line in lines if len(line.strip()) > 10)
+        return {line for line, count in line_counts.items() if count >= threshold}
 
-parser = LlamaParse(
-    api_key=LLAMA_API_KEY,
-    verbose=True,
-    language=LLAMA_LANGUAGE,
-    disable_ocr=LLAMA_DISABLE_OCR,
-    disable_image_extraction=LLAMA_DISABLE_IMG,
-    hide_headers=LLAMA_HIDE_HEADERS,
-    hide_footers=LLAMA_HIDE_FOOTERS,
-    fast_mode=LLAMA_FAST_MODE,
-)
-# parser = LlamaParse(
-#     api_key=os.getenv("LLAMA_CLOUD_API"),  # can also be set in your env as LLAMA_CLOUD_API_KEY
-#     verbose=True,
-#     language="en",
-#     disable_ocr=True,
-#     disable_image_extraction=True,
-#     hide_headers=True,
-#     hide_footers=True,
-#     fast_mode=True,
-# )
+    def _remove_patterns(self, text):
+        lines = text.split("\n")
+        repeated = self._identify_repeated_lines(lines)
+        cleaned = []
+        for line in lines:
+            line = line.strip()
+            if not line or line in repeated:
+                continue
+            if any(re.search(p, line, re.IGNORECASE) for p in self.patterns_to_remove):
+                continue
+            cleaned.append(line)
+        return " ".join(cleaned)
 
-import mimetypes
+    def _fix_common_ocr_errors(self, text):
+        for wrong, right in self.ocr_fixes.items():
+            text = text.replace(wrong, right)
+        text = re.sub(r'\b0\b(?=\s*[a-zA-Z])', 'O', text)
+        text = re.sub(r'\bl\b(?=\s*\d)', '1', text)
+        return text
 
-async def fetch_document(url: str, timeout: int = ASYNC_TIMEOUT):
-    safe_url = url.split('?')[0]
-    logger.info(f"Starting download of PDF from {safe_url}")
-    file_ext = safe_url.split('.')[-1].lower()
-    logger.debug(f"Detected file extension: {file_ext}")
-    
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f'.{file_ext}')
-    temp_path = Path(temp_file.name)
+    def _normalize_whitespace(self, text):
+        return re.sub(r'\s+', ' ', text).strip()
 
-    headers = {'User-Agent': 'HackRx-RAG-System/1.0'}
+    def clean(self, text):
+        return self._normalize_whitespace(
+            self._fix_common_ocr_errors(
+                self._remove_patterns(text)))
+
+
+# =========================
+# Table Utilities
+# =========================
+def forward_fill_row(row):
+    last_value = ""
+    result = []
+    for cell in row:
+        if cell and str(cell).strip():
+            last_value = str(cell).strip()
+        result.append(last_value)
+    return result
+
+def merge_table_headers(header_rows):
+    max_columns = max(len(r) for r in header_rows)
+    return [" ".join(str(r[i]).strip() for r in header_rows if i < len(r) and r[i]).strip() for i in range(max_columns)]
+
+def is_likely_header(row):
+    filled = sum(1 for cell in row if cell and str(cell).strip())
+    return filled >= len(row) / 2
+
+
+# =========================
+# Format-Specific Parsers
+# =========================
+def parse_pdf(path):
+    sanitizer = TextSanitizer()
+    with fitz.open(path) as doc:
+        raw_text = "\n\n".join(page.get_text("text") for page in doc)
+    cleaned_text = sanitizer.clean(raw_text)
+
+    rows = []
+    seen = set()
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
+            for table in page.extract_tables():
+                if not table or len(table) < 2:
+                    continue
+                headers = []
+                start_row = 0
+                for i in range(min(3, len(table))):
+                    if is_likely_header(table[i]):
+                        headers.append(table[i])
+                        start_row = i + 1
+                    else:
+                        break
+                if not headers:
+                    headers = [table[0]]
+                    start_row = 1
+                merged = forward_fill_row(merge_table_headers(headers))
+                for row in table[start_row:]:
+                    row_data = [str(cell).replace("\n", " ").strip() if cell else "" for cell in forward_fill_row(row)]
+                    if len(row_data) != len(merged):
+                        continue
+                    entry = ", ".join(f"{h}: {v}" for h, v in zip(merged, row_data) if h and v)
+                    if entry and entry not in seen:
+                        seen.add(entry)
+                        rows.append(entry)
+    return cleaned_text, rows
+
+def parse_docx(path):
+    sanitizer = TextSanitizer()
+    doc = docx.Document(path)
+    raw_text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    cleaned_text = sanitizer.clean(raw_text)
+
+    rows = []
+    for table in doc.tables:
+        headers = forward_fill_row([c.text.strip() for c in table.rows[0].cells])
+        for row in table.rows[1:]:
+            row_data = [c.text.strip() for c in row.cells]
+            if len(row_data) != len(headers):
+                continue
+            pairs = [f"{h}: {v}" for h, v in zip(headers, row_data) if h and v]
+            if pairs:
+                rows.append(", ".join(pairs))
+    return cleaned_text, rows
+
+def parse_eml(path):
+    sanitizer = TextSanitizer()
+    with open(path, 'rb') as f:
+        msg = email.message_from_binary_file(f, policy=policy.default)
+
+    text_parts, rows = [], []
+    for part in msg.walk():
+        if part.get_content_type() == "text/plain":
+            text_parts.append(part.get_content())
+        elif part.get_content_type() == "text/html":
+            soup = BeautifulSoup(part.get_content(), "html.parser")
+            text_parts.append(soup.get_text())
+            for table in soup.find_all("table"):
+                html_rows = [[td.get_text(strip=True) for td in tr.find_all(["td", "th"])] for tr in table.find_all("tr")]
+                if html_rows and len(html_rows) > 1:
+                    headers = forward_fill_row(html_rows[0])
+                    for row in html_rows[1:]:
+                        if len(row) != len(headers):
+                            continue
+                        entry = ", ".join(f"{h}: {c}" for h, c in zip(headers, row) if h and c)
+                        if entry:
+                            rows.append(entry)
+    cleaned_text = sanitizer.clean("\n".join(text_parts))
+    return cleaned_text, rows
+
+
+# =========================
+# File Handler
+# =========================
+def parse_local_file(file_path):
+    ext = os.path.splitext(file_path)[1].lower()
+    if ext == ".pdf":
+        return parse_pdf(file_path)
+    elif ext == ".docx":
+        return parse_docx(file_path)
+    elif ext == ".eml":
+        return parse_eml(file_path)
+    else:
+        raise ValueError(f"Unsupported file extension: {ext}")
+
+
+def save_output(cleaned_text, table_data, output_path):
+    final_output = cleaned_text.strip()
+    if table_data:
+        final_output += "; " + "; ".join(table_data)
+    final_output = final_output.replace("\n", " ")
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(final_output)
+    logger.info(f"Saved output to {output_path} with {len(table_data)} table rows")
+    return output_path
+
+
+async def fetch_document(url: str, output_file: str = None):
+    if not output_file:
+        output_file = "extracted_content.txt"
 
     try:
+        logger.info(f"Fetching document from {url}")
+        suffix = '.' + url.split('?')[0].split('.')[-1].lower()
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        path = Path(temp_file.name)
+
+        headers = {'User-Agent': 'DocFetcher/1.0'}
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=timeout, headers=headers) as response:
+            async with session.get(url, timeout=30, headers=headers) as response:
                 if response.status != 200:
-                    logger.error(f"Download failed: HTTP {response.status}")
+                    logger.error(f"Failed to fetch file: HTTP {response.status}")
                     return None
-                
-                with open(temp_path, 'wb') as f:
+                with open(path, 'wb') as f:
                     async for chunk in response.content.iter_chunked(4096):
                         f.write(chunk)
 
-        logger.info(f"Downloaded {file_ext.upper()} to {temp_path}")
-        return temp_path, file_ext
-    
-    except asyncio.TimeoutError:
-        logger.error(f"Timeout after {timeout}s")
+        text, tables = parse_local_file(str(path))
+        output = save_output(text, tables, output_file)
+        return output
+
     except Exception as e:
         logger.error(f"Error: {e}")
-    
-    try:
-        temp_path.unlink()
-    except Exception:
-        pass
-    
+    finally:
+        try:
+            path.unlink(missing_ok=True)
+        except Exception:
+            pass
     return None
 
 
+def parse_file(file_path: str, output_file: str = None):
+    if not output_file:
+        output_file = "extracted_content.txt"
 
-async def parse_pdf(path):
-    documents = await parser.aload_data(path)
-    return documents
-
-async def save_pdf(content, url:str):
-    temp_dir = Path(__file__).resolve().parent.parent / "temp"
-    temp_dir.mkdir(exist_ok=True)
-    
-    filename = f"pdf_to_text.txt"
-
-    file_path = temp_dir / filename
-
-    # Save content
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(str(content))
-
-    logger.info(f"Saved parsed content to {file_path}")
-    return str(file_path) 
-
-async def document_downloader(url: str):
-    """
-    Download a document (PDF, DOCX, or email) and extract its text.
-
-    Args:
-        url: URL of the document
-
-    Returns:
-        Extracted text as string, or None if processing fails
-    """
-    safe_url = url
-    if '%' not in url and ('&' in url or '+' in url or '=' in url):
-        # Only encode the query part, not the entire URL
-        parts = url.split('?', 1)
-        if len(parts) > 1:
-            base_url, query = parts
-            # Don't re-encode percent signs
-            safe_url = f"{base_url}?{query}"
-    try:
-        result = await fetch_document(url)
-        if not result:
-            logger.error("Failed to download document")
-            return None
-
-        doc_path, file_ext = result
-
-        try:
-            if file_ext == "pdf":
-                pdf_text =  await parse_pdf(doc_path)
-                saved_path = await save_pdf(pdf_text, url)
-                logger.info(f"Processed PDF file: {doc_path}")
-                chunks = chunker.chunk_pdf_text(saved_path)
-                chunked_file_path = chunker.save_chunks(chunks, url)
-                logger.debug(f"Chunked PDF text into {len(chunks)} segments")
-                embedder.embed_chunks(chunked_file_path)
-                return chunks
-            # elif file_ext in ["docx", "doc"]:
-            #     return parse_docx(doc_path)
-            elif file_ext in ["eml", "msg"]:
-                logger.debug(f"Processing email file: {doc_path}")
-                return None
-                # return parse_email(doc_path)
-            else:
-                logger.error(f"Unsupported file type: {file_ext}")
-                return None
-        finally:
-            try:
-                Path(doc_path).unlink(missing_ok=True)
-            except Exception as e:
-                logger.warning(f"Failed to delete temp file: {e}")
-
-    except Exception as e:
-        logger.error(f"Error processing document: {e}")
+    if not os.path.exists(file_path):
+        logger.error(f"File does not exist: {file_path}")
         return None
-    
+
+    try:
+        text, tables = parse_local_file(file_path)
+        return save_output(text, tables, output_file)
+    except Exception as e:
+        logger.error(f"Error processing file: {e}")
+        return None
