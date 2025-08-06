@@ -1,17 +1,28 @@
 import os
 import json
+import re
 from pathlib import Path
 from dotenv import load_dotenv
-import spacy
 
 # Load config from .env
 load_dotenv()
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", 512))
 CHUNK_OVERLAP = int(os.getenv("CHUNK_OVERLAP", 50))
-SENTENCE_SPLITTER = os.getenv("SENTENCE_SPLITTER", "spacy")
+SENTENCE_SPLITTER = os.getenv("SENTENCE_SPLITTER", "regex")
 
-# Load spaCy model
-nlp = spacy.load("en_core_web_sm")
+def split_into_sentences(text: str):
+    """
+    Split text into sentences using regex patterns.
+    This replaces the spaCy sentence segmentation.
+    """
+    # Basic sentence splitting regex pattern
+    sentence_pattern = r'(?<=[.!?])\s+'
+    sentences = re.split(sentence_pattern, text)
+    
+    # Clean up sentences and filter out empty ones
+    sentences = [sent.strip() for sent in sentences if sent.strip()]
+    
+    return sentences
 
 def chunk_text(file_path: str):
     path = Path(file_path)
@@ -19,8 +30,7 @@ def chunk_text(file_path: str):
         raise FileNotFoundError(f"No such file: {file_path}")
 
     text = path.read_text(encoding="utf-8")
-    doc = nlp(text)
-    sentences = [sent.text.strip() for sent in doc.sents]
+    sentences = split_into_sentences(text)
 
     chunks = []
     current_chunk = ""

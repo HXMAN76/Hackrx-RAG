@@ -4,15 +4,19 @@ from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 from typing import List
 import numpy as np
 import os
+from dotenv import load_dotenv
 from groq import Groq
 from app.config import GROQ_API_KEY, GROQ_MODEL, GROQ_TEMPERATURE, GROQ_MAX_TOKENS
 import ast
+
+# Load environment variables
+load_dotenv()
 
 # Initialize Groq client
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 # Qdrant settings
-QDRANT_HOST = "localhost"
+QDRANT_HOST = os.getenv("QDRANT_URL", "http://localhost:6333").split("://")[-1].split(":")[0]
 QDRANT_PORT = 6333
 COLLECTION_NAME = "RAG-Hackrx"
 TOP_K = 3
