@@ -9,6 +9,12 @@ from pathlib import Path
 import tempfile
 import logging
 import mimetypes
+import re 
+from collections import Counter
+import docx
+import email
+from email import policy
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +41,96 @@ parser = LlamaParse(
     hide_footers=LLAMA_HIDE_FOOTERS,
     fast_mode=LLAMA_FAST_MODE,
 )
+
+class UniversalTextCleaner:
+    def __init__(self):
+        self.noise_patterns = [
+            r'UIN[:\-\s]*[A-Z0-9]+',
+            r'Reg\.?\s*No\.?\s*[:\-\s]*\d+',
+            r'CIN\s*[:\-\s]*[A-Z0-9]+',
+            r'IRDAI\s*Regn?\.?\s*No\.?\s*[:\-\s]*\d+',
+            r'Page\s+\d+\s+of\s+\d+',
+            r'^\d+\s*$',
+            r'www\.[a-zA-Z0-9\-\.]+\.com',
+            r'E-mail:\s*[a-zA-Z0-9\-\.@]+',
+            r'Call at:\s*.*?\(Toll Free.*?\)',
+            r'For more details.*?Toll Free.*?\)',
+            r'Regd\.?\s*&\s*Head Office:.*?-\s*\d{6}',
+            r'Plot no\..*?-\s*\d{6}',
+            r'^[A-Z\s]{10,}\s*$',
+        ]
+        self.ocr_corrections = {
+            ' . ': '. ',
+            ' , ': ', ',
+            ' ; ': '; ',
+            ' : ': ': ',
+            '( ': '(',
+            ' )': ')',
+            ' / ': '/',
+            'O ': '0 ',
+            'l ': '1 ',
+            '  ': ' ',
+        }
+
+    def detect_repeated_elements(self, lines, threshold=3):
+        counts = Counter(line.strip() for line in lines if len(line.strip()) > 10)
+        return {line for line, count in counts.items() if count >= threshold}
+
+    def remove_noise_patterns(self, text):
+        lines = text.split("\n")
+        repeated = self.detect_repeated_elements(lines)
+        cleaned = []
+        for line in lines:
+            line = line.strip()
+            if not line or line in repeated:
+                continue
+            if any(re.search(p, line, re.IGNORECASE) for p in self.noise_patterns):
+                continue
+            cleaned.append(line)
+        return " ".join(cleaned)
+
+    def correct_ocr_errors(self, text):
+        for err, corr in self.ocr_corrections.items():
+            text = text.replace(err, corr)
+        text = re.sub(r'\b0\b(?=\s*[a-zA-Z])', 'O', text)
+        text = re.sub(r'\bl\b(?=\s*\d)', '1', text)
+        return text
+
+    def normalize_spacing(self, text):
+        return re.sub(r'\s+', ' ', text).strip()
+
+    def clean_text(self, text):
+        text = self.remove_noise_patterns(text)
+        text = self.correct_ocr_errors(text)
+        text = self.normalize_spacing(text)
+        return text
+
+
+# =========================
+# Table helpers
+# =========================
+def forward_fill(row):
+    last = ""
+    filled = []
+    for val in row:
+        if val and str(val).strip():
+            last = str(val).strip()
+        filled.append(last)
+    return filled
+
+def merge_headers(header_rows):
+    merged = []
+    num_cols = max(len(r) for r in header_rows)
+    for i in range(num_cols):
+        parts = [str(r[i]).strip() for r in header_rows if i < len(r) and r[i] and str(r[i]).strip()]
+        merged.append(" ".join(parts).strip())
+    return merged
+
+def is_header_row(row):
+    if not row:
+        return False
+    filled_count = sum(1 for cell in row if cell and str(cell).strip())
+    return filled_count >= len(row) / 2
 
 
 async def fetch_document(url: str, timeout: int = ASYNC_TIMEOUT):
@@ -81,8 +177,66 @@ async def fetch_document(url: str, timeout: int = ASYNC_TIMEOUT):
 async def parse_pdf(path):
     documents = await parser.aload_data(path)
     return documents
+def parse_docx(path):
+    cleaner = UniversalTextCleaner()
+    doc = docx.Document(path)
 
-async def save_pdf(content, url:str):
+    # Text
+    raw_text = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+    cleaned_text = cleaner.clean_text(raw_text)
+
+    # Tables
+    table_rows = []
+    for table in doc.tables:
+        headers = forward_fill([cell.text.strip() for cell in table.rows[0].cells])
+        for row in table.rows[1:]:
+            row_data = [cell.text.strip() for cell in row.cells]
+            if len(row_data) != len(headers):
+                continue
+            pairs = [f"{h}: {c}" for h, c in zip(headers, row_data)
+                     if h and c and str(c).strip().lower() != "none"]
+            if pairs:
+                table_rows.append(", ".join(pairs))
+
+    return cleaned_text, table_rows
+
+def parse_email(path):
+    cleaner = UniversalTextCleaner()
+    with open(path, 'rb') as f:
+        msg = email.message_from_binary_file(f, policy=policy.default)
+
+    text_parts = []
+    table_rows = []
+
+    for part in msg.walk():
+        content_type = part.get_content_type()
+        if content_type == "text/plain":
+            text_parts.append(part.get_content())
+        elif content_type == "text/html":
+            html_content = part.get_content()
+            soup = BeautifulSoup(html_content, "html.parser")
+            text_parts.append(soup.get_text())
+
+            # Extract HTML tables
+            for html_table in soup.find_all("table"):
+                rows = []
+                for tr in html_table.find_all("tr"):
+                    cells = [td.get_text(strip=True) for td in tr.find_all(["td", "th"])]
+                    rows.append(cells)
+                if rows and len(rows) > 1:
+                    headers = forward_fill(rows[0])
+                    for row in rows[1:]:
+                        if len(row) != len(headers):
+                            continue
+                        pairs = [f"{h}: {c}" for h, c in zip(headers, row)
+                                 if h and c and str(c).strip().lower() != "none"]
+                        if pairs:
+                            table_rows.append(", ".join(pairs))
+
+    cleaned_text = cleaner.clean_text("\n".join(text_parts))
+    return cleaned_text, table_rows
+
+async def save_file(content):
     temp_dir = Path(__file__).resolve().parent.parent / "temp"
     temp_dir.mkdir(exist_ok=True)
     
@@ -125,20 +279,29 @@ async def document_downloader(url: str):
 
         try:
             if file_ext == "pdf":
-                pdf_text =  await parse_pdf(doc_path)
-                saved_path = await save_pdf(pdf_text, url)
-                logger.info(f"Document saved at: {saved_path}")
-                return saved_path
-                
-            # elif file_ext in ["docx", "doc"]:
-            #     return parse_docx(doc_path)
+                final_output =  await parse_pdf(doc_path)
+
+
+            elif file_ext in ["docx", "doc"]:
+                text,table = parse_docx(doc_path)
+                final_output = text.strip()
+                if table:
+                    final_output += "; " + "; ".join(table)
+
+
             elif file_ext in ["eml", "msg"]:
                 logger.debug(f"Processing email file: {doc_path}")
-                return None
-                # return parse_email(doc_path)
+                text,table = parse_email(doc_path)
+                final_output = text.strip()
+                if table:
+                    final_output += "; " + "; ".join(table)
+                    
             else:
                 logger.error(f"Unsupported file type: {file_ext}")
                 return None
+            saved_path = await save_file(final_output)
+            logger.info(f"Document saved at: {saved_path}")
+            return saved_path
         finally:
             try:
                 Path(doc_path).unlink(missing_ok=True)
