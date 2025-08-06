@@ -6,7 +6,6 @@ milvus/
 volumes/
 qdrant_storage/
 
-
 app/temp/
 
 # 🚫 Secrets & Configs
