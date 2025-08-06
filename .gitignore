@@ -8,6 +8,7 @@ qdrant_storage/
 
 app/temp/
 
+
 # 🚫 Secrets & Configs
 .env
 *.key
