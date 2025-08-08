@@ -2,16 +2,19 @@ import json
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 import logging
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Qdrant configuration
-QDRANT_HOST = "localhost"
-QDRANT_PORT = 6333
-COLLECTION_NAME = "RAG-Hackrx"
+QDRANT_HOST = os.getenv("QDRANT_HOST", "")
+QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
+COLLECTION_NAME = os.getenv("COLLECTION_NAME", "RAG-Hackrx")
 VECTOR_SIZE = 768  # Matches BGE model
 
 # Initialize client
-client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
-
+client = QdrantClient(url=os.getenv("QDRANT_URL", f"http://{QDRANT_HOST}:{QDRANT_PORT}"))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

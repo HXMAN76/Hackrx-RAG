@@ -1,0 +1,9 @@
+**/__pycache__
+**/.git
+**/.gitignore
+**/.vscode
+**/venv
+**/env
+app/temp/*
+README.md
+.pytest_cache

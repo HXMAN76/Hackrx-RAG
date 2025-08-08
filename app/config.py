@@ -29,7 +29,7 @@ VECTOR_SIZE = 768  # Matches embedding model dimension
 VECTOR_DISTANCE = "COSINE"  # Options: COSINE, EUCLID, DOT
 
 # HNSW index parameters for Qdrant (as per requirements)
-INDEX_HNSW_PARAMS = json.loads(os.getenv("INDEX_HNSW_PARAMS", '{"ef_construction": 200, "ef_search": 50}'))
+INDEX_HNSW_PARAMS = json.loads(os.getenv("INDEX_HNSW_PARAMS", '{"ef_construction": 200, "M": 16}'))
 
 # ------------------ LLM (Groq) ------------------
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")  # Required for LLM functionality
@@ -48,19 +48,6 @@ SENTENCE_SPLITTER = os.getenv("SENTENCE_SPLITTER", "nltk")  # Options: nltk, spa
 
 # ------------------ Document Parser ------------------
 PARSER = os.getenv("PARSER", "PyMuPDF")  # Using PyMuPDF by default
-
-# ------------------ Semantic Cache (Milvus) ------------------
-ENABLE_MILVUS_CACHE = os.getenv("ENABLE_MILVUS_CACHE", "true").lower() == "true"
-CACHE_DB_URI = os.getenv("CACHE_DB_URI", "http://localhost:19530")
-CACHE_DB_TOKEN = os.getenv("CACHE_DB_TOKEN", None)
-CACHE_DB_COLLECTION = os.getenv("CACHE_DB", "milvus-cache")
-CACHE_COSINE_THRESHOLD = float(os.getenv("CACHE_COSINE_THRESHOLD", "0.1"))  # Max cosine distance for cache hit
-CACHE_CONNECTION_TIMEOUT = int(os.getenv("CACHE_CONNECTION_TIMEOUT", "3"))  # Timeout in seconds for Milvus connections
-INDEX_IVF_PARAMS = json.loads(os.getenv("INDEX_IVF_PARAMS", '{"nlist": 1024, "metric_type": "COSINE"}'))
-
-# ------------------ Document Tracking (SQLite) ------------------
-DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
-DOCUMENT_DB_PATH = str(DATA_DIR / "documents.db")
 
 # ------------------ Async ------------------
 ASYNC_TIMEOUT = int(os.getenv("ASYNC_TIMEOUT", "20"))  # seconds for HTTP clients
